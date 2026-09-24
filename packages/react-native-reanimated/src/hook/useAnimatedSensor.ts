@@ -86,6 +86,11 @@ function adjustVectorToInterfaceOrientation(data: Value3D) {
   return data;
 }
 
+function ignoreInterfaceOrientation<T>(data: T) {
+  'worklet';
+  return data;
+}
+
 const INTERFACE_ORIENTATION_ADJUSTERS: {
   [K in SensorType]: (data: SensorValueMap[K]) => SensorValueMap[K];
 } = /* @__PURE__ */ (() => ({
@@ -94,6 +99,7 @@ const INTERFACE_ORIENTATION_ADJUSTERS: {
   [SensorType.GRAVITY]: adjustVectorToInterfaceOrientation,
   [SensorType.MAGNETIC_FIELD]: adjustVectorToInterfaceOrientation,
   [SensorType.ROTATION]: adjustRotationToInterfaceOrientation,
+  [SensorType.HINGE]: ignoreInterfaceOrientation,
 }))();
 
 const NOOP = () => {
@@ -117,7 +123,7 @@ const getServerSensorAvailability = () => false;
  */
 export function useAnimatedSensor<T extends SensorType>(
   sensorType: T,
-  userConfig?: Partial<SensorConfig>
+  userConfig?: T extends SensorType.HINGE ? never : Partial<SensorConfig>
 ): AnimatedSensor<SensorValueMap[T]> {
   const {
     interval = 'auto',
