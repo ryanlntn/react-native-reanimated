@@ -82,13 +82,13 @@ function adjustVectorToInterfaceOrientation(data: Value3D) {
 
 const INTERFACE_ORIENTATION_ADJUSTERS: {
   [K in SensorType]: (data: SensorValueMap[K]) => SensorValueMap[K];
-} = {
+} = /* @__PURE__ */ (() => ({
   [SensorType.ACCELEROMETER]: adjustVectorToInterfaceOrientation,
   [SensorType.GYROSCOPE]: adjustVectorToInterfaceOrientation,
   [SensorType.GRAVITY]: adjustVectorToInterfaceOrientation,
   [SensorType.MAGNETIC_FIELD]: adjustVectorToInterfaceOrientation,
   [SensorType.ROTATION]: adjustRotationToInterfaceOrientation,
-};
+}))();
 
 const NOOP = () => {
   // NOOP

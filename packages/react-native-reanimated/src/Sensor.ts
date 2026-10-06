@@ -15,7 +15,7 @@ const createValue3D = () => ({ x: 0, y: 0, z: 0, interfaceOrientation: 0 });
 
 const INITIAL_SENSOR_VALUES: {
   [K in SensorType]: () => SensorValueMap[K];
-} = {
+} = /* @__PURE__ */ (() => ({
   [SensorType.ACCELEROMETER]: createValue3D,
   [SensorType.GYROSCOPE]: createValue3D,
   [SensorType.GRAVITY]: createValue3D,
@@ -30,7 +30,7 @@ const INITIAL_SENSOR_VALUES: {
     roll: 0,
     interfaceOrientation: 0,
   }),
-};
+}))();
 
 export default class Sensor<T extends SensorType = SensorType> {
   public listenersNumber = 0;
