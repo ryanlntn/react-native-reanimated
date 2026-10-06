@@ -5,6 +5,8 @@ import { Modal, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import type {
   EasingFunction,
   EasingFunctionFactory,
+  EntryExitAnimationFunction,
+  LayoutAnimation,
   LayoutAnimationFunction,
 } from 'react-native-reanimated';
 import Animated, {
@@ -54,9 +56,10 @@ export type TargetSample = {
   playbackKeys: string[];
   /**
    * The physical animations of the playback of the target, in the order in
-   * which the platform applies them.
+   * which the platform applies them. Each has its value at the start and at the
+   * end of each segment.
    */
-  members: { property: string; from: number[]; to: number[] }[];
+  members: { property: string; values: number[][] }[];
   monotonicTimeMs: number;
 };
 
@@ -96,7 +99,6 @@ export const END_TOP = 40;
 export const DURATION = 400;
 export const POSITION_TOLERANCE = 0.5;
 export const REPEATED_STARTS = 30;
-export const PRESET_WAIT = 1500;
 export const FILTER_OPACITY = 0.5;
 // The travel of two display frames at 60 fps.
 export const FIRST_FRAME_TRAVEL = ((END_LEFT - START_LEFT) / DURATION) * 34;
@@ -173,6 +175,20 @@ export type Track = {
   traceTarget: string;
   from: number;
   to: number;
+  /** Absent for a linear easing. */
+  easing?: TrackEasing;
+};
+
+/** The curve of an easing, and the time at which the curve has a progress. */
+export type TrackEasing = { curve: EasingFunction; timeOf: EasingFunction };
+
+/** The default easing of `withTiming`. */
+export const DEFAULT_EASING: TrackEasing = {
+  curve: Easing.inOut(Easing.quad),
+  timeOf: (progress) =>
+    progress < 0.5
+      ? Math.sqrt(Math.max(0, progress) / 2)
+      : 1 - Math.sqrt(Math.max(0, 1 - progress) / 2),
 };
 
 export async function readTrack(tag: number, { sampleTarget }: Track) {
@@ -215,8 +231,8 @@ export async function sampleRows(
 export const twinStartTime = makeMutable(0);
 
 /**
- * A linear easing that is no native easing, so its animation is frame-driven.
- * It gives the start time of its animation on the animation clock.
+ * A linear easing that gives the start time of its animation on the animation
+ * clock. Use it in a frame-driven animation: each call writes the time.
  */
 export const recordedLinearOf = (durationMs: number) => (progress: number) => {
   'worklet';
@@ -226,9 +242,8 @@ export const recordedLinearOf = (durationMs: number) => (progress: number) => {
 };
 
 /**
- * The curve of `easing` in a form that is no native easing, so its animation is
- * frame-driven. It gives the start time of its animation on the animation
- * clock.
+ * The curve of `easing` in a form that gives the start time of its animation on
+ * the animation clock. Use it in a frame-driven animation.
  */
 export const recordedCurveOf = (
   easing: EasingFunction | EasingFunctionFactory,
@@ -243,13 +258,55 @@ export const recordedCurveOf = (
   };
 };
 
-/** The easings with a native form that are not linear. */
+type AnimationFunction = (values: never) => LayoutAnimation;
+type AnimationValues =
+  | Parameters<EntryExitAnimationFunction>[0]
+  | Parameters<LayoutAnimationFunction>[0];
+
+/**
+ * The animation of a builder or of a function with no native description on its
+ * leaves. It is frame-driven, and its trace has the failure
+ * `UnsupportedTiming`.
+ */
+export function frameDrivenOf(
+  animation: { build: () => AnimationFunction } | AnimationFunction
+) {
+  const build = (
+    typeof animation === 'function' ? animation : animation.build()
+  ) as (values: AnimationValues) => LayoutAnimation;
+  return (values: AnimationValues) => {
+    'worklet';
+    const result = build(values);
+    const animations = Object.values(result.animations).flatMap((leaf) =>
+      Array.isArray(leaf)
+        ? leaf.flatMap((operation: Record<string, unknown>) =>
+            Object.values(operation)
+          )
+        : [leaf]
+    );
+    for (const animation of animations) {
+      if (typeof animation === 'object' && animation !== null) {
+        delete (animation as { __nativeTiming?: unknown }).__nativeTiming;
+      }
+    }
+    return result;
+  };
+}
+
+/**
+ * Easings with a native form that are not linear: two have control points, and
+ * the native route fits the others.
+ */
 export const CURVED_EASINGS: Record<
   string,
   EasingFunction | EasingFunctionFactory
 > = {
   'Easing.ease': Easing.ease,
   'a Bezier curve': Easing.bezier(0.3, 0, 0.7, 1),
+  'Easing.inOut(Easing.quad)': Easing.inOut(Easing.quad),
+  'Easing.sin': Easing.sin,
+  'Easing.out(Easing.exp)': Easing.out(Easing.exp),
+  'Easing.bounce': Easing.bounce,
 };
 
 const animationTime = () => {

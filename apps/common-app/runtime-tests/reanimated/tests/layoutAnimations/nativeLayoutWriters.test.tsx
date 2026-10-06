@@ -13,6 +13,7 @@ import type {
 } from 'react-native-reanimated';
 import Animated, {
   createAnimatedComponent,
+  Easing,
   getStaticFeatureFlag,
   useAnimatedProps,
   useAnimatedStyle,
@@ -28,7 +29,7 @@ import {
   useTestRef,
   wait,
 } from '../../../ReJest/RuntimeTestsApi';
-import type { PairProps } from './nativeLayoutTestKit';
+import type { Leaf, PairProps } from './nativeLayoutTestKit';
 import {
   ClippingScrollView,
   BOX_REF,
@@ -803,77 +804,84 @@ describe('a native layout group whose tracks the platform removes', () => {
   const twoFrames = (distance: number, durationMs: number) =>
     POSITION_TOLERANCE + (2 * FRAME_MS * distance) / durationMs;
 
-  test('a clip of the view gives its layout group to the frame driver: the view shows the values of the frame driver after a scroll back, and the callback gets true one time at the natural end', async () => {
-    const opacityDuration = 2 * LAYOUT_DURATION;
-    const layouts = pairLayoutsOf((hasCallback) => ({
-      originX: { duration: LAYOUT_DURATION, hasCallback },
-      opacity: { duration: opacityDuration, initial: 0.3, to: 1 },
-    }));
-    const clipped = await move(
-      { left: START_LEFT, ...layouts },
-      { left: END_LEFT, ...layouts }
-    );
-    await waitUntil(clipped, LAYOUT_DURATION / 4);
-    await takeTrace();
-    scrollTo(CLIPPED_OFFSET);
-    await waitUntil(clipped, LAYOUT_DURATION / 2);
-    const transfer = await takeTransferTrace(clipped);
-    expect(transfer.host).toBe(
-      'TrackEnded:Opacity:false > TrackEnded:PositionX:false > Ended:Interrupted:PlatformRemoved'
-    );
-    expect(transfer.hasFrameUpdate).toBe(true);
-    expect(callbacks.length).toBe(0);
-    const hidden = await readPair(clipped);
-    expect(hidden.native.keys).toBe(0);
-    expect(
-      isNear(
-        hidden.native.x,
-        hidden.frame.x,
-        twoFrames(END_LEFT, LAYOUT_DURATION)
-      )
-    ).toBe(true);
-    expect(
-      isNear(
-        hidden.native.opacity,
-        hidden.frame.opacity,
-        SAMPLED_OPACITY_TOLERANCE
-      )
-    ).toBe(true);
+  const clippedTracks: [string, Leaf['easing'], number][] = [
+    ['one segment', Easing.linear, 1],
+    ['the two segments of the default easing', 'default', 2],
+  ];
+  for (const [trackName, easing, largestSlope] of clippedTracks) {
+    test(`a clip of the view gives its layout group with tracks of ${trackName} to the frame driver: the view shows the values of the frame driver after a scroll back, and the callback gets true one time at the natural end`, async () => {
+      const opacityDuration = 2 * LAYOUT_DURATION;
+      const layouts = pairLayoutsOf((hasCallback) => ({
+        originX: { duration: LAYOUT_DURATION, hasCallback, easing },
+        opacity: { duration: opacityDuration, initial: 0.3, to: 1, easing },
+      }));
+      const travel = largestSlope * END_LEFT;
+      const clipped = await move(
+        { left: START_LEFT, ...layouts },
+        { left: END_LEFT, ...layouts }
+      );
+      await waitUntil(clipped, LAYOUT_DURATION / 4);
+      await takeTrace();
+      scrollTo(CLIPPED_OFFSET);
+      await waitUntil(clipped, LAYOUT_DURATION / 2);
+      const transfer = await takeTransferTrace(clipped);
+      expect(transfer.host).toBe(
+        'TrackEnded:Opacity:false > TrackEnded:PositionX:false > Ended:Interrupted:PlatformRemoved'
+      );
+      expect(transfer.hasFrameUpdate).toBe(true);
+      expect(callbacks.length).toBe(0);
+      const hidden = await readPair(clipped);
+      expect(hidden.native.keys).toBe(0);
+      expect(
+        isNear(
+          hidden.native.x,
+          hidden.frame.x,
+          twoFrames(travel, LAYOUT_DURATION)
+        )
+      ).toBe(true);
+      expect(
+        isNear(
+          hidden.native.opacity,
+          hidden.frame.opacity,
+          SAMPLED_OPACITY_TOLERANCE
+        )
+      ).toBe(true);
 
-    scrollTo(0);
-    await wait(4 * FRAME_MS);
-    await waitUntil(clipped, 0.75 * LAYOUT_DURATION);
-    const shown = await readPair(clipped);
-    expect(shown.native.keys).toBe(0);
-    expect(
-      isNear(
-        shown.native.shownX,
-        shown.frame.x,
-        twoFrames(END_LEFT, LAYOUT_DURATION)
-      )
-    ).toBe(true);
-    expect(shown.native.shownX > START_LEFT + BOX_SIZE / 2 + 10).toBe(true);
-    expect(shown.native.shownX < END_LEFT + BOX_SIZE / 2 - 10).toBe(true);
-    expect(
-      isNear(
-        shown.native.shownOpacity,
-        shown.frame.opacity,
-        SAMPLED_OPACITY_TOLERANCE
-      )
-    ).toBe(true);
-    expect(callbacks.length).toBe(0);
+      scrollTo(0);
+      await wait(4 * FRAME_MS);
+      await waitUntil(clipped, 0.75 * LAYOUT_DURATION);
+      const shown = await readPair(clipped);
+      expect(shown.native.keys).toBe(0);
+      expect(
+        isNear(
+          shown.native.shownX,
+          shown.frame.x,
+          twoFrames(travel, LAYOUT_DURATION)
+        )
+      ).toBe(true);
+      expect(shown.native.shownX > START_LEFT + BOX_SIZE / 2 + 10).toBe(true);
+      expect(shown.native.shownX < END_LEFT + BOX_SIZE / 2 - 10).toBe(true);
+      expect(
+        isNear(
+          shown.native.shownOpacity,
+          shown.frame.opacity,
+          SAMPLED_OPACITY_TOLERANCE
+        )
+      ).toBe(true);
+      expect(callbacks.length).toBe(0);
 
-    await waitUntil(clipped, opacityDuration + 400);
-    expect(sortedCallbacks()).toBe('frame:true,native:true');
-    expect(
-      Math.abs(callbackTimes.native - callbackTimes.frame) < 4 * FRAME_MS
-    ).toBe(true);
-    const end = await readBox(clipped.nativeTag);
-    expect(end.keys).toBe(0);
-    expect(isNear(end.shownOpacity, 1)).toBe(true);
-    expect(isNear(end.shownX, END_LEFT + BOX_SIZE / 2)).toBe(true);
-    await render(null);
-  });
+      await waitUntil(clipped, opacityDuration + 400);
+      expect(sortedCallbacks()).toBe('frame:true,native:true');
+      expect(
+        Math.abs(callbackTimes.native - callbackTimes.frame) < 4 * FRAME_MS
+      ).toBe(true);
+      const end = await readBox(clipped.nativeTag);
+      expect(end.keys).toBe(0);
+      expect(isNear(end.shownOpacity, 1)).toBe(true);
+      expect(isNear(end.shownX, END_LEFT + BOX_SIZE / 2)).toBe(true);
+      await render(null);
+    });
+  }
 
   test('a clip after a replacement that kept a native track of the older build: the callback of the old group has false, and the callback of the new group gets true at the natural end', async () => {
     const replacementAt = PAIR_DURATION / 5;
